@@ -2,7 +2,7 @@ APP_NAME = VoiceInput
 BUILD_DIR = .build
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
 BINARY = $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
-INSTALL_DIR = ~/Applications
+INSTALL_DIR = $(HOME)/Applications
 
 SWIFT_FILES = $(shell find Sources -name '*.swift')
 FRAMEWORKS = -framework AppKit -framework AVFoundation -framework Speech -framework Carbon -framework CoreGraphics -framework QuartzCore
