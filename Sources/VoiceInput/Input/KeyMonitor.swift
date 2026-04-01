@@ -11,7 +11,7 @@ final class KeyMonitor {
     private var isRecording = false
     private var holdTimer: Timer?
 
-    private static let holdThreshold: TimeInterval = 3.0
+    private static let holdThreshold: TimeInterval = 0.5
 
     func start() {
         let eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
@@ -67,10 +67,13 @@ final class KeyMonitor {
             // Fn key just pressed
             fnDownTime = Date()
             holdTimer?.invalidate()
-            holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdThreshold, repeats: false) { [weak self] _ in
-                guard let self = self, self.fnDownTime != nil else { return }
-                self.isRecording = true
-                self.onRecordingStart?()
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdThreshold, repeats: false) { [weak self] _ in
+                    guard let self = self, self.fnDownTime != nil else { return }
+                    self.isRecording = true
+                    self.onRecordingStart?()
+                }
             }
             // Suppress the event to prevent emoji picker
             return nil
