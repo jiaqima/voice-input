@@ -13,7 +13,9 @@ FRAMEWORKS = -framework AppKit -framework AVFoundation -framework Speech -framew
 XCODE_TC = /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain
 SWIFTC = $(shell [ -x "$(XCODE_TC)/usr/bin/swiftc" ] && echo "$(XCODE_TC)/usr/bin/swiftc" || echo "swiftc")
 SDK = $(shell DEVELOPER_DIR=$$([ -d /Applications/Xcode.app ] && echo /Applications/Xcode.app/Contents/Developer || echo /Library/Developer/CommandLineTools) xcrun --sdk macosx --show-sdk-path 2>/dev/null)
-SWIFT_FLAGS = -target arm64-apple-macosx14.0 -swift-version 5 -sdk $(SDK)
+MODULE_CACHE_DIR = $(abspath $(BUILD_DIR)/ModuleCache)
+BUILD_JOBS = $(shell sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+SWIFT_FLAGS = -target arm64-apple-macosx14.0 -swift-version 5 -sdk $(SDK) -module-cache-path $(MODULE_CACHE_DIR)
 
 # Code signing identity. Use "make SIGN_IDENTITY=VoiceInput\ Dev install" with a
 # self-signed certificate to preserve TCC permissions across rebuilds.
@@ -36,6 +38,7 @@ build: $(BINARY)
 $(BINARY): $(SWIFT_FILES) $(WHISPER_LIB) Info.plist VoiceInput.entitlements
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
+	@mkdir -p "$(MODULE_CACHE_DIR)"
 	$(SWIFTC) $(SWIFT_FLAGS) $(FRAMEWORKS) \
 		-import-objc-header $(BRIDGING_HEADER) \
 		-Xcc -I$(WHISPER_DIR)/include -Xcc -I$(WHISPER_DIR)/ggml/include \
@@ -84,10 +87,11 @@ $(WHISPER_LIB): ensure-whisper-submodule
 		-DCMAKE_C_COMPILER=$$(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun --find cc) \
 		-DCMAKE_CXX_COMPILER=$$(DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun --find c++) \
 		-DBUILD_SHARED_LIBS=OFF \
+		-DGGML_NATIVE=OFF \
 		-DWHISPER_BUILD_EXAMPLES=OFF \
 		-DWHISPER_BUILD_TESTS=OFF \
 		-DCMAKE_BUILD_TYPE=Release
-	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
+	cd $(WHISPER_DIR) && cmake --build build --config Release -j$(BUILD_JOBS)
 
 # Download a whisper model (default: large-v3-turbo-q8_0)
 download-model:
