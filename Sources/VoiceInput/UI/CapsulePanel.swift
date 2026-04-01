@@ -12,6 +12,7 @@ final class CapsulePanel: NSPanel {
     private let textLabel = NSTextField(labelWithString: "")
     private let backgroundView = NSVisualEffectView()
     private var currentTextWidth: CGFloat = 160
+    private var dismissWorkItem: DispatchWorkItem?
 
     init() {
         let initialWidth = horizontalPadding + waveformWidth + 8 + minTextWidth + horizontalPadding
@@ -84,6 +85,7 @@ final class CapsulePanel: NSPanel {
     }
 
     func showRecording() {
+        cancelDismissWorkItem()
         updateText("Listening...")
         positionAtBottom()
 
@@ -136,11 +138,28 @@ final class CapsulePanel: NSPanel {
     }
 
     func showRefining() {
+        cancelDismissWorkItem()
         textLabel.stringValue = "Refining..."
         waveformView.stopAnimating()
     }
 
+    func showStatus(_ text: String, dismissAfter delay: TimeInterval = 1.8) {
+        cancelDismissWorkItem()
+        waveformView.stopAnimating()
+        updateText(text)
+        positionAtBottom()
+        alphaValue = 1
+        orderFrontRegardless()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.dismiss()
+        }
+        dismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
     func dismiss() {
+        cancelDismissWorkItem()
         waveformView.stopAnimating()
 
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -159,6 +178,11 @@ final class CapsulePanel: NSPanel {
             self.orderOut(nil)
             self.alphaValue = 1
         })
+    }
+
+    private func cancelDismissWorkItem() {
+        dismissWorkItem?.cancel()
+        dismissWorkItem = nil
     }
 
     private func positionAtBottom() {

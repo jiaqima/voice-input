@@ -258,18 +258,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         finalText = text
                     }
 
-                    self?.capsulePanel.dismiss()
-                    // Small delay to let the capsule dismiss animation start
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self?.textInjector.inject(text: finalText)
-                    }
+                    self?.injectTranscription(finalText)
                 }
             }
         } else {
-            capsulePanel.dismiss()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.textInjector.inject(text: text)
+            injectTranscription(text)
+        }
+    }
+
+    private func injectTranscription(_ text: String) {
+        let targetContext = textInjector.captureTargetContext()
+
+        capsulePanel.dismiss()
+        // Wait for dismiss animation (220ms) to fully complete plus margin for the target app to regain focus.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.textInjector.inject(text: text, targetContext: targetContext) { result in
+                DispatchQueue.main.async {
+                    self?.handleInjectionResult(result)
+                }
             }
+        }
+    }
+
+    private func handleInjectionResult(_ result: TextInjector.InjectionResult) {
+        switch result {
+        case .accessibilitySuccess, .typingSimulationSuccess:
+            break
+
+        case .automaticPastePosted:
+            break
+
+        case .manualPasteRequired:
+            capsulePanel.showStatus("Text copied. Press Cmd+V to paste.")
         }
     }
 }
