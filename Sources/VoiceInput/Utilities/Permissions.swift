@@ -36,15 +36,9 @@ final class Permissions {
     }
 
     static func checkAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
-        if !AXIsProcessTrustedWithOptions(options) {
-            DispatchQueue.main.async {
-                showAlert(
-                    title: "Accessibility Access Required",
-                    message: "Voice Input needs accessibility access to monitor the Fn key and inject text. Please grant access in System Settings > Privacy & Security > Accessibility, then restart the app."
-                )
-            }
-        }
+        guard !AXIsProcessTrusted() else { return }
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
     }
 
     private static func showAlert(title: String, message: String) {
