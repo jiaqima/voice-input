@@ -18,7 +18,7 @@ No test suite or linter is configured.
 VoiceInput is a macOS background app (no dock icon) that maps **Fn key hold → audio capture → speech recognition → optional LLM refinement → clipboard paste** into the active application.
 
 **AppDelegate** is the central orchestrator. It owns all components and drives the recording lifecycle:
-1. `KeyMonitor` detects a 3-second Fn key hold via `CGEvent` tap (accessibility permission required). Short presses are re-posted as synthetic events to preserve the macOS emoji picker.
+1. `KeyMonitor` detects a 0.5-second Fn key hold via `NSEvent.addGlobalMonitorForEvents` (accessibility permission required). Short presses are ignored to preserve the macOS emoji picker.
 2. `AudioRecorder` captures PCM audio via `AVAudioEngine`, emitting RMS levels for the waveform UI.
 3. `SpeechRecognizer` wraps `SFSpeechRecognizer` and reports partial/final transcriptions.
 4. `LLMClient` (optional) refines the transcript using an OpenAI-compatible API — aimed at fixing speech recognition errors (CJK homophones, misheard English terms).
@@ -38,4 +38,4 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn key hold → 
 
 ## Permissions
 
-The app requests three permissions at startup (`Permissions.swift`): microphone, speech recognition, and accessibility. The `CGEvent` tap used by `KeyMonitor` silently fails without accessibility access.
+The app requests three permissions at startup (`Permissions.swift`): microphone, speech recognition, and accessibility. `NSEvent.addGlobalMonitorForEvents` returns nil without accessibility access.
