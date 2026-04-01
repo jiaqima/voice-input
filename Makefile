@@ -13,6 +13,11 @@ SWIFTC = $(shell [ -x "$(XCODE_TC)/usr/bin/swiftc" ] && echo "$(XCODE_TC)/usr/bi
 SDK = $(shell DEVELOPER_DIR=$$([ -d /Applications/Xcode.app ] && echo /Applications/Xcode.app/Contents/Developer || echo /Library/Developer/CommandLineTools) xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 SWIFT_FLAGS = -target arm64-apple-macosx14.0 -swift-version 5 -sdk $(SDK)
 
+# Code signing identity. Use "make SIGN_IDENTITY=VoiceInput\ Dev install" with a
+# self-signed certificate to preserve TCC permissions across rebuilds.
+# Default: ad-hoc signing (permissions reset on every rebuild).
+SIGN_IDENTITY ?= -
+
 .PHONY: build run install clean
 
 build: $(BINARY)
@@ -22,7 +27,7 @@ $(BINARY): $(SWIFT_FILES) Info.plist VoiceInput.entitlements
 	@mkdir -p "$(APP_BUNDLE)/Contents/Resources"
 	$(SWIFTC) $(SWIFT_FLAGS) $(FRAMEWORKS) $(SWIFT_FILES) -o "$(BINARY)"
 	@cp Info.plist "$(APP_BUNDLE)/Contents/Info.plist"
-	@codesign --force --sign - --entitlements VoiceInput.entitlements "$(APP_BUNDLE)"
+	@codesign --force --sign "$(SIGN_IDENTITY)" --entitlements VoiceInput.entitlements "$(APP_BUNDLE)"
 	@echo "Built: $(APP_BUNDLE)"
 
 run: build

@@ -22,7 +22,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn key hold → 
 2. `AudioRecorder` captures PCM audio via `AVAudioEngine`, emitting RMS levels for the waveform UI.
 3. `SpeechRecognizer` wraps `SFSpeechRecognizer` and reports partial/final transcriptions.
 4. `LLMClient` (optional) refines the transcript using an OpenAI-compatible API — aimed at fixing speech recognition errors (CJK homophones, misheard English terms).
-5. `TextInjector` switches the active input method to ASCII (for CJK contexts), writes text to the clipboard, simulates Cmd+V, then restores the original clipboard and input method.
+5. `TextInjector` switches the active input method to ASCII (for CJK contexts), inserts text via the Accessibility API (`kAXSelectedTextAttribute`), falling back to clipboard + simulated Cmd+V if AX insertion fails, then restores the input method.
 
 **UI** runs as a floating `NSPanel` (HUD material, glass morphism) with a `WaveformView` animated at 60 fps via `CVDisplayLink`.
 
@@ -31,11 +31,11 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn key hold → 
 ## Key Design Decisions
 
 - **No external dependencies** — pure Swift using only system frameworks (AppKit, AVFoundation, Speech, Carbon, CoreGraphics, QuartzCore).
-- **Clipboard injection** (`TextInjector`) is application-agnostic; direct accessibility API text insertion is not used.
+- **Text injection** (`TextInjector`) uses AX API (`kAXSelectedTextAttribute`) as the primary method, with clipboard + simulated Cmd+V as fallback.
 - **LLM base URL is configurable** — any OpenAI-compatible provider (OpenAI, Ollama, LM Studio, etc.) works.
 - **CJK input method switching** (`InputMethodManager`) detects 9+ input method variants and must switch to ASCII before paste to avoid double-conversion.
 - **Swift 6 / macOS 14+** — the package targets arm64 with swift-version 5 compiler flags.
 
 ## Permissions
 
-The app requests three permissions at startup (`Permissions.swift`): microphone, speech recognition, and accessibility. `NSEvent.addGlobalMonitorForEvents` returns nil without accessibility access.
+The app requests three permissions at startup (`Permissions.swift`): microphone, speech recognition, and accessibility. `NSEvent.addGlobalMonitorForEvents` returns nil without accessibility access. The CGEvent-based paste fallback additionally requires Input Monitoring permission (macOS 15+). Because the app is ad-hoc signed, all TCC grants are invalidated on every rebuild — permissions must be re-granted after `make install`.

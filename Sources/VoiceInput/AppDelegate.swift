@@ -152,6 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.capsulePanel.updateText(text)
             }
         }
+
+        speechRecognizer.onError = { error in
+            NSLog("[VoiceInput] speech error: %@", error.localizedDescription)
+        }
     }
 
     // MARK: - Recording
