@@ -10,7 +10,8 @@ Hold **Fn** for 0.5 seconds to start recording. Release to stop — the transcri
 - **Multiple languages** — English, Simplified Chinese, Traditional Chinese, Japanese, Korean
 - **LLM refinement** — optionally polish the transcript via any OpenAI-compatible API (fixes homophones, misheard technical terms)
 - **CJK-safe paste** — automatically switches to ASCII input mode before pasting, then restores your input method
-- **No dependencies** — pure Swift using only system frameworks
+- **Two speech backends** — Apple Speech (online, streaming) or whisper.cpp (fully offline, local)
+- **No Swift dependencies** — pure Swift using system frameworks + whisper.cpp (C library, bundled)
 
 ## Usage
 
@@ -24,11 +25,13 @@ Hold **Fn** for 0.5 seconds to start recording. Release to stop — the transcri
 
 - macOS 14+
 - Apple Silicon (arm64)
+- cmake (for building whisper.cpp): `brew install cmake`
 
 ## Build & Install
 
 ```bash
-make install   # builds and copies to ~/Applications/VoiceInput.app
+make download-model   # download whisper model (~142MB, one-time)
+make install          # builds whisper.cpp + app, copies to ~/Applications
 ```
 
 Or just run locally:
@@ -36,6 +39,8 @@ Or just run locally:
 ```bash
 make run
 ```
+
+To use a different whisper model: `make download-model DEFAULT_MODEL=small.en`
 
 ### Stable signing (optional)
 

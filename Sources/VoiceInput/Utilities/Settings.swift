@@ -10,6 +10,8 @@ final class Settings {
         static let llmBaseURL = "llmBaseURL"
         static let llmAPIKey = "llmAPIKey"
         static let llmModel = "llmModel"
+        static let sttBackend = "sttBackend"
+        static let whisperModelPath = "whisperModelPath"
     }
 
     var language: String {
@@ -39,5 +41,20 @@ final class Settings {
 
     var isLLMConfigured: Bool {
         !llmBaseURL.isEmpty && !llmAPIKey.isEmpty && !llmModel.isEmpty
+    }
+
+    // Speech-to-text backend: "apple" or "whisper"
+    var sttBackend: String {
+        get { defaults.string(forKey: Keys.sttBackend) ?? "apple" }
+        set { defaults.set(newValue, forKey: Keys.sttBackend) }
+    }
+
+    var whisperModelPath: String {
+        get { defaults.string(forKey: Keys.whisperModelPath) ?? defaultWhisperModelPath }
+        set { defaults.set(newValue, forKey: Keys.whisperModelPath) }
+    }
+
+    private var defaultWhisperModelPath: String {
+        Bundle.main.resourcePath.map { $0 + "/ggml-base.en.bin" } ?? ""
     }
 }

@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let keyMonitor = KeyMonitor()
     private let audioRecorder = AudioRecorder()
-    private let speechRecognizer = SpeechRecognizer()
+    private var speechRecognizer: SpeechRecognizerProtocol = SpeechRecognizer()
     private let textInjector = TextInjector()
     private let llmClient = LLMClient()
     private let capsulePanel = CapsulePanel()
@@ -30,9 +30,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Permissions.requestAll()
+        speechRecognizer = createSpeechRecognizer()
         setupStatusItem()
         setupKeyMonitor()
         setupAudioPipeline()
+    }
+
+    private func createSpeechRecognizer() -> SpeechRecognizerProtocol {
+        if Settings.shared.sttBackend == "whisper" {
+            return WhisperSpeechRecognizer()
+        }
+        return SpeechRecognizer()
     }
 
     // MARK: - Status Bar Menu
@@ -61,6 +69,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         langItem.submenu = langMenu
         menu.addItem(langItem)
+
+        // Speech backend submenu
+        let backendItem = NSMenuItem(title: "Speech Backend", action: nil, keyEquivalent: "")
+        let backendMenu = NSMenu()
+        let currentBackend = Settings.shared.sttBackend
+
+        let appleItem = NSMenuItem(title: "Apple Speech", action: #selector(selectBackend(_:)), keyEquivalent: "")
+        appleItem.target = self
+        appleItem.representedObject = "apple"
+        appleItem.state = currentBackend == "apple" ? .on : .off
+        backendMenu.addItem(appleItem)
+
+        let whisperItem = NSMenuItem(title: "Whisper (Local)", action: #selector(selectBackend(_:)), keyEquivalent: "")
+        whisperItem.target = self
+        whisperItem.representedObject = "whisper"
+        whisperItem.state = currentBackend == "whisper" ? .on : .off
+        backendMenu.addItem(whisperItem)
+
+        backendItem.submenu = backendMenu
+        menu.addItem(backendItem)
 
         // LLM Refinement submenu
         let llmItem = NSMenuItem(title: "LLM Refinement", action: nil, keyEquivalent: "")
@@ -96,6 +124,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectLanguage(_ sender: NSMenuItem) {
         guard let locale = sender.representedObject as? String else { return }
         Settings.shared.language = locale
+        rebuildMenu()
+    }
+
+    @objc private func selectBackend(_ sender: NSMenuItem) {
+        guard let backend = sender.representedObject as? String else { return }
+        guard !isRecording else { return }
+        Settings.shared.sttBackend = backend
+        speechRecognizer = createSpeechRecognizer()
+        setupAudioPipeline()
         rebuildMenu()
     }
 

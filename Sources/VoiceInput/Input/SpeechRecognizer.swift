@@ -1,6 +1,6 @@
 import Speech
 
-final class SpeechRecognizer {
+final class SpeechRecognizer: SpeechRecognizerProtocol {
     var onPartialResult: ((String) -> Void)?
     var onFinalResult: ((String) -> Void)?
     var onError: ((Error) -> Void)?
