@@ -3,6 +3,8 @@ BUILD_DIR = .build
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
 BINARY = $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 INSTALL_DIR = $(HOME)/Applications
+CONFIG_DIR = $(HOME)/.config/voice-input
+CONFIG_FILE = $(CONFIG_DIR)/config.json
 
 SWIFT_FILES = $(shell find Sources -name '*.swift')
 FRAMEWORKS = -framework AppKit -framework AVFoundation -framework Speech -framework Carbon -framework CoreGraphics -framework QuartzCore -framework Accelerate -framework Metal
@@ -24,9 +26,10 @@ WHISPER_BUILD = $(WHISPER_DIR)/build
 WHISPER_LIB = $(WHISPER_BUILD)/src/libwhisper.a
 BRIDGING_HEADER = Sources/Bridge/whisper-bridging-header.h
 MODEL_DIR = models
-DEFAULT_MODEL ?= base.en
+DEFAULT_MODEL ?= large-v3-turbo-q8_0
+INSTALLED_MODEL_PATH = $(INSTALL_DIR)/$(APP_NAME).app/Contents/Resources/ggml-$(DEFAULT_MODEL).bin
 
-.PHONY: build run install clean whisper-lib download-model
+.PHONY: build run install clean whisper-lib download-model install-config-default
 
 build: $(BINARY)
 
@@ -67,7 +70,7 @@ $(WHISPER_LIB):
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-# Download a whisper model (default: base.en)
+# Download a whisper model (default: large-v3-turbo-q8_0)
 download-model:
 	@mkdir -p $(MODEL_DIR)
 	@echo "Downloading ggml-$(DEFAULT_MODEL).bin..."
@@ -82,7 +85,28 @@ install: build
 	@mkdir -p "$(INSTALL_DIR)"
 	@rm -rf "$(INSTALL_DIR)/$(APP_NAME).app"
 	@cp -R "$(APP_BUNDLE)" "$(INSTALL_DIR)/$(APP_NAME).app"
+	@$(MAKE) install-config-default HOME="$(HOME)" INSTALL_DIR="$(INSTALL_DIR)" APP_NAME="$(APP_NAME)" DEFAULT_MODEL="$(DEFAULT_MODEL)"
 	@echo "Installed to $(INSTALL_DIR)/$(APP_NAME).app"
+
+install-config-default:
+	@if [ -f "$(CONFIG_FILE)" ]; then \
+		echo "Config exists; leaving it unchanged: $(CONFIG_FILE)"; \
+	elif [ ! -f "$(INSTALLED_MODEL_PATH)" ]; then \
+		echo "Default model not found in installed app; skipping config creation: $(INSTALLED_MODEL_PATH)"; \
+	else \
+		mkdir -p "$(CONFIG_DIR)"; \
+		printf '%s\n' \
+			'{' \
+			'  "language": "en-US",' \
+			'  "sttBackend": "apple",' \
+			'  "whisperModelPath": "$(INSTALLED_MODEL_PATH)",' \
+			'  "llmEnabled": false,' \
+			'  "llmBaseURL": "",' \
+			'  "llmAPIKey": "",' \
+			'  "llmModel": ""' \
+			'}' > "$(CONFIG_FILE)"; \
+		echo "Created default config: $(CONFIG_FILE)"; \
+	fi
 
 clean:
 	@rm -rf "$(BUILD_DIR)"

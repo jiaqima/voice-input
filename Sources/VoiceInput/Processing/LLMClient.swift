@@ -1,6 +1,60 @@
 import Foundation
 
 final class LLMClient {
+    final class RefinementRequest {
+        private let lock = NSLock()
+        private var completion: ((Result<String, Error>) -> Void)?
+        private var task: URLSessionDataTask?
+        private var isFinished = false
+
+        init(completion: @escaping (Result<String, Error>) -> Void) {
+            self.completion = completion
+        }
+
+        func setTask(_ task: URLSessionDataTask) {
+            lock.lock()
+            if isFinished {
+                lock.unlock()
+                task.cancel()
+                return
+            }
+            self.task = task
+            lock.unlock()
+        }
+
+        func complete(_ result: Result<String, Error>) {
+            let callback: ((Result<String, Error>) -> Void)?
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                return
+            }
+            isFinished = true
+            callback = completion
+            completion = nil
+            task = nil
+            lock.unlock()
+
+            callback?(result)
+        }
+
+        func cancel() {
+            let taskToCancel: URLSessionDataTask?
+            lock.lock()
+            guard !isFinished else {
+                lock.unlock()
+                return
+            }
+            isFinished = true
+            taskToCancel = task
+            task = nil
+            completion = nil
+            lock.unlock()
+
+            taskToCancel?.cancel()
+        }
+    }
+
     static let systemPrompt = """
     You are a speech recognition post-processor. Your ONLY job is to fix obvious speech recognition errors in the transcribed text. Be extremely conservative:
 
@@ -20,29 +74,19 @@ final class LLMClient {
     Respond with the corrected text only, nothing else.
     """
 
-    func refine(text: String, completion: @escaping (Result<String, Error>) -> Void) {
+    private static let refinementMaxTokens = 128
+
+    func refine(text: String, completion: @escaping (Result<String, Error>) -> Void) -> RefinementRequest {
+        let refinementRequest = RefinementRequest(completion: completion)
         let settings = Settings.shared
         guard settings.isLLMConfigured else {
-            completion(.success(text))
-            return
+            refinementRequest.complete(.success(text))
+            return refinementRequest
         }
 
-        var baseURL = settings.llmBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if baseURL.hasSuffix("/") { baseURL.removeLast() }
-
-        // Support both full URL and base URL
-        let urlString: String
-        if baseURL.hasSuffix("/chat/completions") {
-            urlString = baseURL
-        } else if baseURL.hasSuffix("/v1") {
-            urlString = baseURL + "/chat/completions"
-        } else {
-            urlString = baseURL + "/v1/chat/completions"
-        }
-
-        guard let url = URL(string: urlString) else {
-            completion(.failure(LLMError.invalidURL))
-            return
+        guard let url = Self.chatCompletionsURL(from: settings.llmBaseURL) else {
+            refinementRequest.complete(.failure(LLMError.invalidURL))
+            return refinementRequest
         }
 
         var request = URLRequest(url: url)
@@ -57,53 +101,44 @@ final class LLMClient {
                 ["role": "system", "content": Self.systemPrompt],
                 ["role": "user", "content": text],
             ],
+            "stream": false,
             "temperature": 0.1,
-            "max_tokens": 2048,
+            "max_tokens": Self.refinementMaxTokens,
         ]
 
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            refinementRequest.complete(.failure(error))
+            return refinementRequest
+        }
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.shared.dataTask(with: request) { data, _, error in
             if let error = error {
-                completion(.failure(error))
+                refinementRequest.complete(.failure(error))
                 return
             }
 
             guard let data = data else {
-                completion(.failure(LLMError.noData))
+                refinementRequest.complete(.failure(LLMError.noData))
                 return
             }
 
             do {
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let choices = json["choices"] as? [[String: Any]],
-                      let first = choices.first,
-                      let message = first["message"] as? [String: Any],
-                      let content = message["content"] as? String else {
-                    completion(.failure(LLMError.invalidResponse))
-                    return
-                }
-                completion(.success(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+                let refinedText = try Self.parseRefinementResponse(data)
+                refinementRequest.complete(.success(refinedText))
             } catch {
-                completion(.failure(error))
+                refinementRequest.complete(.failure(error))
             }
-        }.resume()
+        }
+
+        refinementRequest.setTask(task)
+        task.resume()
+        return refinementRequest
     }
 
     func testConnection(baseURL: String, apiKey: String, model: String, completion: @escaping (Result<String, Error>) -> Void) {
-        var base = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if base.hasSuffix("/") { base.removeLast() }
-
-        let urlString: String
-        if base.hasSuffix("/chat/completions") {
-            urlString = base
-        } else if base.hasSuffix("/v1") {
-            urlString = base + "/chat/completions"
-        } else {
-            urlString = base + "/v1/chat/completions"
-        }
-
-        guard let url = URL(string: urlString) else {
+        guard let url = Self.chatCompletionsURL(from: baseURL) else {
             completion(.failure(LLMError.invalidURL))
             return
         }
@@ -119,6 +154,7 @@ final class LLMClient {
             "messages": [
                 ["role": "user", "content": "Say OK"],
             ],
+            "stream": false,
             "max_tokens": 10,
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -145,12 +181,118 @@ final class LLMClient {
             }
         }.resume()
     }
+
+    private static func chatCompletionsURL(from baseURL: String) -> URL? {
+        var normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedBaseURL.hasSuffix("/") {
+            normalizedBaseURL.removeLast()
+        }
+
+        let urlString: String
+        if normalizedBaseURL.hasSuffix("/chat/completions") {
+            urlString = normalizedBaseURL
+        } else if normalizedBaseURL.hasSuffix("/v1") {
+            urlString = normalizedBaseURL + "/chat/completions"
+        } else {
+            urlString = normalizedBaseURL + "/v1/chat/completions"
+        }
+
+        return URL(string: urlString)
+    }
+
+    private static func parseRefinementResponse(_ data: Data) throws -> String {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LLMError.invalidResponse
+        }
+
+        if let apiError = apiErrorMessage(from: json) {
+            throw LLMError.apiError(apiError)
+        }
+
+        guard let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = messageContent(from: message) else {
+            throw LLMError.invalidResponse
+        }
+
+        guard let sanitizedContent = sanitizeRefinedText(content) else {
+            throw LLMError.emptyResponse
+        }
+
+        return sanitizedContent
+    }
+
+    private static func apiErrorMessage(from json: [String: Any]) -> String? {
+        if let errorObject = json["error"] as? [String: Any],
+           let message = errorObject["message"] as? String,
+           !message.isEmpty {
+            return message
+        }
+
+        if let errorMessage = json["error"] as? String, !errorMessage.isEmpty {
+            return errorMessage
+        }
+
+        return nil
+    }
+
+    private static func messageContent(from message: [String: Any]) -> String? {
+        if let content = message["content"] as? String {
+            return content
+        }
+
+        guard let contentParts = message["content"] as? [Any] else {
+            return nil
+        }
+
+        let combinedText = contentParts.compactMap(textContent(from:)).joined()
+        return combinedText.isEmpty ? nil : combinedText
+    }
+
+    private static func textContent(from part: Any) -> String? {
+        guard let dictionary = part as? [String: Any] else {
+            return nil
+        }
+
+        if let text = dictionary["text"] as? String {
+            return text
+        }
+
+        if let textObject = dictionary["text"] as? [String: Any],
+           let value = textObject["value"] as? String {
+            return value
+        }
+
+        if let content = dictionary["content"] as? String {
+            return content
+        }
+
+        return nil
+    }
+
+    private static func sanitizeRefinedText(_ rawText: String) -> String? {
+        var text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        while text.hasPrefix("<think>") {
+            guard let endRange = text.range(of: "</think>") else {
+                text = ""
+                break
+            }
+
+            text.removeSubrange(text.startIndex..<endRange.upperBound)
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return text.isEmpty ? nil : text
+    }
 }
 
 enum LLMError: LocalizedError {
     case invalidURL
     case noData
     case invalidResponse
+    case emptyResponse
     case apiError(String)
 
     var errorDescription: String? {
@@ -158,6 +300,7 @@ enum LLMError: LocalizedError {
         case .invalidURL: return "Invalid API URL"
         case .noData: return "No data received"
         case .invalidResponse: return "Invalid response format"
+        case .emptyResponse: return "Response did not contain usable text"
         case .apiError(let msg): return msg
         }
     }

@@ -14,6 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentTranscription = ""
     private var isRecording = false
     private var isRebuildingMenu = false
+    private var activeSubmissionID: UInt64?
+    private var nextSubmissionID: UInt64 = 0
+    private var refinementTimeoutWorkItem: DispatchWorkItem?
+    private var pendingRefinementRequest: LLMClient.RefinementRequest?
+
+    private static let refinementTimeout: TimeInterval = 2.0
 
     // Language options
     private struct LanguageOption {
@@ -209,6 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func startRecording() {
         guard !isRecording else { return }
+        cancelPendingRefinement(reason: "starting a new recording")
+        activeSubmissionID = nil
         isRecording = true
         currentTranscription = ""
 
@@ -237,6 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func stopRecording() {
         guard isRecording else { return }
         isRecording = false
+        let submissionID = makeSubmissionID()
+        activeSubmissionID = submissionID
 
         // Stop audio & recognition
         audioRecorder.stop()
@@ -247,47 +257,159 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice Input")
         }
 
+        let targetContext = textInjector.captureTargetContext()
         let text = currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
+            activeSubmissionID = nil
             capsulePanel.dismiss()
             return
         }
 
         // LLM refinement if enabled
         if Settings.shared.llmEnabled && Settings.shared.isLLMConfigured {
-            capsulePanel.showRefining()
-
-            llmClient.refine(text: text) { [weak self] result in
-                DispatchQueue.main.async {
-                    let finalText: String
-                    switch result {
-                    case .success(let refined):
-                        finalText = refined
-                    case .failure(let error):
-                        print("LLM refinement failed: \(error). Using original text.")
-                        finalText = text
-                    }
-
-                    self?.injectTranscription(finalText)
-                }
-            }
+            startRefinement(for: text, targetContext: targetContext, submissionID: submissionID)
         } else {
-            injectTranscription(text)
+            injectTranscription(text, targetContext: targetContext, submissionID: submissionID)
         }
     }
 
-    private func injectTranscription(_ text: String) {
-        let targetContext = textInjector.captureTargetContext()
+    private func startRefinement(
+        for originalText: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64
+    ) {
+        let startedAt = Date()
+        NSLog("[VoiceInput] submission \(submissionID) refinement started (\(originalText.count) chars)")
+        capsulePanel.showRefining()
 
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            self?.handleRefinementTimeout(
+                originalText: originalText,
+                targetContext: targetContext,
+                submissionID: submissionID,
+                startedAt: startedAt
+            )
+        }
+        refinementTimeoutWorkItem = timeoutWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.refinementTimeout, execute: timeoutWorkItem)
+
+        pendingRefinementRequest = llmClient.refine(text: originalText) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.handleRefinementResult(
+                    result,
+                    originalText: originalText,
+                    targetContext: targetContext,
+                    submissionID: submissionID,
+                    startedAt: startedAt
+                )
+            }
+        }
+    }
+
+    private func handleRefinementResult(
+        _ result: Result<String, Error>,
+        originalText: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64,
+        startedAt: Date
+    ) {
+        guard isCurrentSubmission(submissionID) else {
+            NSLog("[VoiceInput] submission \(submissionID) refinement result ignored because a newer submission is active")
+            return
+        }
+
+        refinementTimeoutWorkItem?.cancel()
+        refinementTimeoutWorkItem = nil
+        pendingRefinementRequest = nil
+
+        let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
+        switch result {
+        case .success(let refinedText):
+            NSLog("[VoiceInput] submission \(submissionID) refinement succeeded in \(elapsed)s")
+            injectTranscription(refinedText, targetContext: targetContext, submissionID: submissionID)
+        case .failure(let error):
+            NSLog("[VoiceInput] submission \(submissionID) refinement failed in \(elapsed)s: \(error.localizedDescription)")
+            NSLog("[VoiceInput] submission \(submissionID) falling back to original transcript")
+            injectTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
+        }
+    }
+
+    private func handleRefinementTimeout(
+        originalText: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64,
+        startedAt: Date
+    ) {
+        guard isCurrentSubmission(submissionID) else { return }
+
+        let elapsed = String(format: "%.2f", Date().timeIntervalSince(startedAt))
+        NSLog("[VoiceInput] submission \(submissionID) refinement timed out after \(elapsed)s")
+        NSLog("[VoiceInput] submission \(submissionID) falling back to original transcript")
+        cancelPendingRefinement(reason: "submission \(submissionID) timed out")
+        injectTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
+    }
+
+    private func injectTranscription(
+        _ text: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64
+    ) {
+        guard isCurrentSubmission(submissionID) else {
+            NSLog("[VoiceInput] submission \(submissionID) injection skipped because a newer submission is active")
+            return
+        }
+
+        let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalText.isEmpty else {
+            NSLog("[VoiceInput] submission \(submissionID) injection skipped because the transcript is empty")
+            activeSubmissionID = nil
+            capsulePanel.dismiss()
+            return
+        }
+
+        cancelPendingRefinement(reason: "submission \(submissionID) is ready to inject")
         capsulePanel.dismiss()
+
         // Wait for dismiss animation (220ms) to fully complete plus margin for the target app to regain focus.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.textInjector.inject(text: text, targetContext: targetContext) { result in
+            guard let self else { return }
+            guard self.isCurrentSubmission(submissionID) else {
+                NSLog("[VoiceInput] submission \(submissionID) delayed injection ignored because a newer submission is active")
+                return
+            }
+
+            NSLog("[VoiceInput] submission \(submissionID) injecting \(finalText.count) chars")
+            self.textInjector.inject(text: finalText, targetContext: targetContext) { result in
                 DispatchQueue.main.async {
-                    self?.handleInjectionResult(result)
+                    guard self.isCurrentSubmission(submissionID) else {
+                        NSLog("[VoiceInput] submission \(submissionID) injection result ignored because a newer submission is active")
+                        return
+                    }
+
+                    self.activeSubmissionID = nil
+                    self.handleInjectionResult(result)
                 }
             }
         }
+    }
+
+    private func cancelPendingRefinement(reason: String) {
+        if pendingRefinementRequest != nil {
+            NSLog("[VoiceInput] canceling pending refinement: \(reason)")
+        }
+        pendingRefinementRequest?.cancel()
+        pendingRefinementRequest = nil
+        refinementTimeoutWorkItem?.cancel()
+        refinementTimeoutWorkItem = nil
+    }
+
+    private func isCurrentSubmission(_ submissionID: UInt64) -> Bool {
+        activeSubmissionID == submissionID
+    }
+
+    private func makeSubmissionID() -> UInt64 {
+        nextSubmissionID += 1
+        return nextSubmissionID
     }
 
     private func handleInjectionResult(_ result: TextInjector.InjectionResult) {

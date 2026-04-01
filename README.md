@@ -30,7 +30,7 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 ## Build & Install
 
 ```bash
-make download-model   # download whisper model (~142MB, one-time)
+make download-model   # download default whisper model (large-v3-turbo-q8_0, ~874MB, one-time)
 make install          # builds whisper.cpp + app, copies to ~/Applications
 ```
 
@@ -66,6 +66,8 @@ On first launch the app requests:
 ## LLM Refinement (optional)
 
 Open **Settings** from the menu bar icon to configure an OpenAI-compatible endpoint (base URL, API key, model). Works with OpenAI, Ollama, LM Studio, or any compatible provider. Leave unconfigured to use raw speech recognition output.
+
+VoiceInput treats refinement as best-effort and falls back to the raw transcript if the model does not respond within about 2 seconds. Fast instruction models work best here; slower reasoning models such as `deepseek-r1` may time out more often.
 
 ## Acknowledgement
 

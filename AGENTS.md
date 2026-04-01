@@ -6,7 +6,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ```bash
 make whisper-lib   # Build whisper.cpp static library (requires cmake)
-make download-model  # Download default whisper model (base.en, ~142MB)
+make download-model  # Download default whisper model (large-v3-turbo-q8_0, ~874MB)
 make build         # Compile to .build/VoiceInput.app (builds whisper-lib if needed)
 make run           # Build and run
 make install       # Install to ~/Applications/VoiceInput.app
