@@ -29,7 +29,7 @@ MODEL_DIR = models
 DEFAULT_MODEL ?= large-v3-turbo-q8_0
 INSTALLED_MODEL_PATH = $(INSTALL_DIR)/$(APP_NAME).app/Contents/Resources/ggml-$(DEFAULT_MODEL).bin
 
-.PHONY: build run install clean whisper-lib download-model install-config-default
+.PHONY: build run install clean whisper-lib download-model install-config-default ensure-whisper-submodule
 
 build: $(BINARY)
 
@@ -57,7 +57,26 @@ $(BINARY): $(SWIFT_FILES) $(WHISPER_LIB) Info.plist VoiceInput.entitlements
 # Build whisper.cpp as a static library
 whisper-lib: $(WHISPER_LIB)
 
-$(WHISPER_LIB):
+ensure-whisper-submodule:
+	@if [ -f "$(WHISPER_DIR)/CMakeLists.txt" ] && [ -f "$(WHISPER_DIR)/include/whisper.h" ]; then \
+		:; \
+	else \
+		if ! command -v git >/dev/null 2>&1; then \
+			echo "git is required to initialize vendor/whisper.cpp."; \
+			echo "Install git, then run: git submodule update --init --recursive vendor/whisper.cpp"; \
+			exit 1; \
+		fi; \
+		echo "Initializing vendor/whisper.cpp submodule..."; \
+		if git submodule update --init --recursive "$(WHISPER_DIR)"; then \
+			echo "Initialized vendor/whisper.cpp submodule."; \
+		else \
+			echo "Failed to initialize vendor/whisper.cpp submodule."; \
+			echo "Try running: git submodule update --init --recursive vendor/whisper.cpp"; \
+			exit 1; \
+		fi; \
+	fi
+
+$(WHISPER_LIB): ensure-whisper-submodule
 	cd $(WHISPER_DIR) && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 	cmake -B build \
 		-DCMAKE_OSX_ARCHITECTURES=arm64 \

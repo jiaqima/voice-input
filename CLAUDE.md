@@ -17,6 +17,8 @@ Download a different model: `make download-model DEFAULT_MODEL=small.en`
 
 No test suite or linter is configured.
 
+`vendor/whisper.cpp` is a git submodule. The Makefile now initializes it automatically on first use for `make whisper-lib`, `make build`, `make run`, and `make install`. If auto-init fails, run `git submodule update --init --recursive vendor/whisper.cpp` manually.
+
 ## Architecture
 
 VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-and-hold → audio capture → speech recognition → optional LLM refinement → text injection** into the active application.
@@ -37,7 +39,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-
 ## Key Design Decisions
 
 - **No external Swift dependencies** — pure Swift using system frameworks + whisper.cpp linked as a static C library.
-- **whisper.cpp** is a git submodule under `vendor/whisper.cpp`, built via cmake into static libraries. The bridging header at `Sources/Bridge/whisper-bridging-header.h` imports `whisper.h`. The Makefile handles building with the Xcode toolchain (needed for C++ headers on some systems).
+- **whisper.cpp** is a git submodule under `vendor/whisper.cpp`, built via cmake into static libraries. The bridging header at `Sources/Bridge/whisper-bridging-header.h` imports `whisper.h`. The Makefile initializes the submodule automatically on first use and builds it with the Xcode toolchain (needed for C++ headers on some systems).
 - **Text injection** (`TextInjector`) uses AX API (`kAXSelectedTextAttribute`) as the primary method, with clipboard + simulated Cmd+V as fallback.
 - **LLM base URL is configurable** — any OpenAI-compatible provider (OpenAI, Ollama, LM Studio, etc.) works.
 - **CJK input method switching** (`InputMethodManager`) detects 9+ input method variants and must switch to ASCII before paste to avoid double-conversion.

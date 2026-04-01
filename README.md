@@ -26,6 +26,7 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 - macOS 14+
 - Apple Silicon (arm64)
 - cmake (for building whisper.cpp): `brew install cmake`
+- git (for first-use whisper.cpp submodule initialization)
 
 ## Build & Install
 
@@ -33,6 +34,8 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 make download-model   # download default whisper model (large-v3-turbo-q8_0, ~874MB, one-time)
 make install          # builds whisper.cpp + app, copies to ~/Applications
 ```
+
+The repo includes `vendor/whisper.cpp` as a git submodule. `make build`, `make run`, `make whisper-lib`, and `make install` now initialize it automatically on first use. If that step fails, run `git submodule update --init --recursive vendor/whisper.cpp` manually and retry.
 
 Or just run locally:
 
