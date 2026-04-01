@@ -12,9 +12,14 @@ final class KeyMonitor {
     private var holdTimer: Timer?
 
     private static let holdThreshold: TimeInterval = 0.5
+    // keycode 63 = kVK_Function (Globe/Fn key on modern Macs)
+    private static let fnKeyCode: Int64 = 63
 
     func start() {
+        // Listen for flagsChanged (older Macs) AND keyDown/keyUp (newer Globe key Macs)
         let eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -28,7 +33,14 @@ final class KeyMonitor {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("Failed to create event tap. Accessibility permission required.")
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Accessibility Access Required"
+                alert.informativeText = "Voice Input needs Accessibility access to monitor the Fn key. Please grant access in System Settings > Privacy & Security > Accessibility, then restart the app."
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
             return
         }
 
@@ -52,46 +64,65 @@ final class KeyMonitor {
     }
 
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Re-enable tap if disabled by system
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap = eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
+            if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passRetained(event)
         }
 
-        let flags = event.flags
-        let fnPressed = flags.contains(.maskSecondaryFn)
+        let isFnPress: Bool
+        let isFnRelease: Bool
 
-        if fnPressed && fnDownTime == nil {
-            // Fn key just pressed
+        switch type {
+        case .flagsChanged:
+            let fnActive = event.flags.contains(.maskSecondaryFn)
+            isFnPress   = fnActive && fnDownTime == nil
+            isFnRelease = !fnActive && fnDownTime != nil
+
+        case .keyDown:
+            guard event.getIntegerValueField(.keyboardEventKeycode) == Self.fnKeyCode,
+                  event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
+                return Unmanaged.passRetained(event)
+            }
+            isFnPress   = fnDownTime == nil
+            isFnRelease = false
+
+        case .keyUp:
+            guard event.getIntegerValueField(.keyboardEventKeycode) == Self.fnKeyCode else {
+                return Unmanaged.passRetained(event)
+            }
+            isFnPress   = false
+            isFnRelease = fnDownTime != nil
+
+        default:
+            return Unmanaged.passRetained(event)
+        }
+
+        if isFnPress {
             fnDownTime = Date()
             holdTimer?.invalidate()
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdThreshold, repeats: false) { [weak self] _ in
-                    guard let self = self, self.fnDownTime != nil else { return }
-                    self.isRecording = true
-                    self.onRecordingStart?()
-                }
+            // The run loop source is on the main run loop, so this callback runs on the
+            // main thread — Timer.scheduledTimer is safe here without DispatchQueue.main.async.
+            holdTimer = Timer.scheduledTimer(withTimeInterval: Self.holdThreshold, repeats: false) { [weak self] _ in
+                guard let self = self, self.fnDownTime != nil else { return }
+                self.isRecording = true
+                self.onRecordingStart?()
             }
-            // Suppress the event to prevent emoji picker
-            return nil
-        } else if !fnPressed && fnDownTime != nil {
-            // Fn key released
+            return nil  // suppress to prevent emoji picker on hold
+        }
+
+        if isFnRelease {
+            let wasRecording = isRecording
             fnDownTime = nil
             holdTimer?.invalidate()
             holdTimer = nil
 
-            if isRecording {
+            if wasRecording {
                 isRecording = false
                 onRecordingStop?()
-                // Suppress release event
                 return nil
             }
 
-            // Short press: re-post the Fn key events so emoji picker etc. still work
-            // We create a synthetic flagsChanged event with Fn flag
+            // Short press: re-post synthetic events so emoji picker still works
             if let fnDown = CGEvent(source: nil) {
                 fnDown.type = .flagsChanged
                 fnDown.flags = [.maskSecondaryFn]
