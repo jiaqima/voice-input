@@ -1,7 +1,7 @@
 import AppKit
 import Speech
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let keyMonitor = KeyMonitor()
     private let audioRecorder = AudioRecorder()
@@ -9,10 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let textInjector = TextInjector()
     private let llmClient = LLMClient()
     private let capsulePanel = CapsulePanel()
-    private let settingsWindowController = SettingsWindowController()
+
 
     private var currentTranscription = ""
     private var isRecording = false
+    private var isRebuildingMenu = false
 
     // Language options
     private struct LanguageOption {
@@ -54,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu() {
+        isRebuildingMenu = true
+        defer { isRebuildingMenu = false }
         let menu = NSMenu()
 
         // Language submenu
@@ -103,14 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enableItem.state = Settings.shared.llmEnabled ? .on : .off
         llmMenu.addItem(enableItem)
 
-        llmMenu.addItem(NSMenuItem.separator())
+        llmItem.submenu = llmMenu
+        menu.addItem(llmItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
-        llmMenu.addItem(settingsItem)
-
-        llmItem.submenu = llmMenu
-        menu.addItem(llmItem)
+        menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -118,7 +121,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard !isRebuildingMenu else { return }
+        Settings.shared.load()
+        rebuildMenu()
     }
 
     @objc private func selectLanguage(_ sender: NSMenuItem) {
@@ -142,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        settingsWindowController.showWindow()
+        NSWorkspace.shared.open(Settings.configFileURL)
     }
 
     @objc private func quitApp() {
