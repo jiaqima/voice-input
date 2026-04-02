@@ -61,7 +61,7 @@ By default the app is ad-hoc signed, which means macOS resets all permission gra
 On first launch the app requests:
 - **Microphone** — for audio capture
 - **Speech Recognition** — for transcription
-- **Accessibility** — for reading the focused text field and inserting text via the Accessibility API
+- **Accessibility** — for global Fn key monitoring via `NSEvent.addGlobalMonitorForEvents`
 - **Input Monitoring** — fallback for simulated Cmd+V paste (add manually in System Settings > Privacy & Security > Input Monitoring if the clipboard fallback doesn't work)
 
 > **Note:** The app is ad-hoc signed, so macOS invalidates permission grants after each rebuild. You may need to re-grant Accessibility and Input Monitoring permissions after running `make install`.

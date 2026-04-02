@@ -95,13 +95,6 @@ final class Settings {
             if path.isEmpty {
                 return defaultWhisperModelPath
             }
-
-            if path == oldBundledDefaultModelPath {
-                config.whisperModelPath = defaultWhisperModelPath
-                save()
-                return defaultWhisperModelPath
-            }
-
             return path
         }
         set { config.whisperModelPath = newValue; save() }
@@ -109,9 +102,5 @@ final class Settings {
 
     private var defaultWhisperModelPath: String {
         Bundle.main.resourcePath.map { $0 + "/ggml-large-v3-turbo-q8_0.bin" } ?? ""
-    }
-
-    private var oldBundledDefaultModelPath: String {
-        Bundle.main.resourcePath.map { $0 + "/ggml-base.en.bin" } ?? ""
     }
 }

@@ -5,12 +5,9 @@ final class TextInjector {
     enum PasteStrategy: String {
         case applescript
         case hid
-        case session
-        case pid
     }
 
     enum InjectionResult {
-        case accessibilitySuccess
         case typingSimulationSuccess
         case automaticPastePosted(PasteStrategy)
         case manualPasteRequired
@@ -20,12 +17,6 @@ final class TextInjector {
         let processIdentifier: pid_t
         let localizedName: String?
         let bundleIdentifier: String?
-    }
-
-    private struct FocusedElementContext {
-        let target: TargetContext
-        let element: AXUIElement
-        let role: String
     }
 
     private let inputMethodManager = InputMethodManager()
@@ -57,22 +48,17 @@ final class TextInjector {
         let result: InjectionResult
         if simulateTyping(text: text) {
             result = .typingSimulationSuccess
-        } else if insertViaAccessibility(text: text, preferredTarget: resolvedTarget) {
-            result = .accessibilitySuccess
         } else {
             result = fallBackToClipboardPaste(text: text, targetContext: resolvedTarget)
         }
 
         // Restore input method after a delay so pasted/manual text stays ASCII-safe.
-        let restoreInputMethod = { [weak self] in
-            if needsSwitch {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    self?.inputMethodManager.restorePreviousInputSource()
-                }
+        if needsSwitch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.inputMethodManager.restorePreviousInputSource()
             }
         }
 
-        restoreInputMethod()
         completion(result)
     }
 
@@ -88,100 +74,6 @@ final class TextInjector {
             targetContext.processIdentifier,
             targetContext.bundleIdentifier ?? "unknown"
         )
-    }
-
-    private func liveFrontmostTargetContext() -> TargetContext? {
-        captureTargetContext()
-    }
-
-    private func focusedElementContext(for targetContext: TargetContext?) -> FocusedElementContext? {
-        guard let targetContext else {
-            NSLog("[TextInjector] No target context available for AX insertion")
-            return nil
-        }
-
-        let appElement = AXUIElementCreateApplication(targetContext.processIdentifier)
-        var focusedRef: CFTypeRef?
-        let focusResult = AXUIElementCopyAttributeValue(
-            appElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedRef
-        )
-
-        guard focusResult == .success, let focusedRef else {
-            NSLog(
-                "[TextInjector] Could not get focused element from %@ (pid=%d): %d",
-                targetContext.localizedName ?? "unknown",
-                targetContext.processIdentifier,
-                focusResult.rawValue
-            )
-            return nil
-        }
-
-        let element = focusedRef as! AXUIElement
-        let role = stringValue(of: kAXRoleAttribute as CFString, for: element) ?? "unknown"
-        NSLog("[TextInjector] Focused element role: %@", role)
-
-        return FocusedElementContext(target: targetContext, element: element, role: role)
-    }
-
-    private func insertViaAccessibility(text: String, preferredTarget: TargetContext?) -> Bool {
-        if let preferredTarget,
-           let context = focusedElementContext(for: preferredTarget),
-           insertViaAccessibility(text: text, context: context) {
-            NSLog("[TextInjector] AX insertion succeeded on captured target app")
-            return true
-        }
-
-        let liveTarget = liveFrontmostTargetContext()
-        if let liveTarget,
-           liveTarget.processIdentifier != preferredTarget?.processIdentifier {
-            NSLog(
-                "[TextInjector] Retrying AX insertion against live frontmost app: %@ (pid=%d bundle=%@)",
-                liveTarget.localizedName ?? "unknown",
-                liveTarget.processIdentifier,
-                liveTarget.bundleIdentifier ?? "unknown"
-            )
-        }
-
-        if let liveTarget,
-           let context = focusedElementContext(for: liveTarget),
-           insertViaAccessibility(text: text, context: context) {
-            NSLog("[TextInjector] AX insertion succeeded on live frontmost app")
-            return true
-        }
-
-        NSLog("[TextInjector] AX insertion failed on both captured and live targets")
-        return false
-    }
-
-    private func insertViaAccessibility(text: String, context: FocusedElementContext) -> Bool {
-        NSLog("[TextInjector] Trying AXSelectedText insertion for role %@", context.role)
-
-        var settable: DarwinBoolean = false
-        let settableResult = AXUIElementIsAttributeSettable(
-            context.element,
-            kAXSelectedTextAttribute as CFString,
-            &settable
-        )
-
-        guard settableResult == .success, settable.boolValue else {
-            NSLog("[TextInjector] Focused element does not support settable AXSelectedText")
-            return false
-        }
-
-        let result = AXUIElementSetAttributeValue(
-            context.element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFTypeRef
-        )
-        if result == .success {
-            NSLog("[TextInjector] Successfully inserted text via AXSelectedText")
-            return true
-        }
-
-        NSLog("[TextInjector] AXSelectedText insertion failed: %d", result.rawValue)
-        return false
     }
 
     /// Simulate typing by injecting Unicode text via CGEvent, the same mechanism macOS Dictation uses.
@@ -213,13 +105,6 @@ final class TextInjector {
 
         NSLog("[TextInjector] Typing simulation completed")
         return true
-    }
-
-    private func stringValue(of attribute: CFString, for element: AXUIElement) -> String? {
-        var valueRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute, &valueRef)
-        guard result == .success else { return nil }
-        return valueRef as? String
     }
 
     private func fallBackToClipboardPaste(text: String, targetContext: TargetContext?) -> InjectionResult {
@@ -256,20 +141,16 @@ final class TextInjector {
     }
 
     private func simulatePaste(targetContext: TargetContext?) -> PasteStrategy? {
-        let strategies = pasteStrategies(for: targetContext)
-        for strategy in strategies {
-            NSLog("[TextInjector] Trying paste strategy %@ for %@", strategy.rawValue, targetContext?.bundleIdentifier ?? "unknown app")
-            switch strategy {
-            case .applescript:
-                if simulatePasteViaAppleScript() {
-                    return .applescript
-                }
+        // AppleScript via System Events is the most reliable across app types (including Electron).
+        // CGEvent via HID is kept as fallback.
+        NSLog("[TextInjector] Trying paste strategy applescript for %@", targetContext?.bundleIdentifier ?? "unknown app")
+        if simulatePasteViaAppleScript() {
+            return .applescript
+        }
 
-            case .hid, .session, .pid:
-                if let result = simulatePasteViaCGEvent(strategy: strategy, targetContext: targetContext) {
-                    return result
-                }
-            }
+        NSLog("[TextInjector] Trying paste strategy hid for %@", targetContext?.bundleIdentifier ?? "unknown app")
+        if let result = simulatePasteViaCGEvent() {
+            return result
         }
 
         return nil
@@ -290,47 +171,25 @@ final class TextInjector {
         return true
     }
 
-    private func simulatePasteViaCGEvent(strategy: PasteStrategy, targetContext: TargetContext?) -> PasteStrategy? {
+    private func simulatePasteViaCGEvent() -> PasteStrategy? {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let source else {
             NSLog("[TextInjector] Failed to create CGEventSource for paste fallback")
             return nil
         }
 
-        let commandKeyCode: CGKeyCode = 55
-        let vKeyCode: CGKeyCode = 9
-        guard let events = makePasteEvents(source: source, commandKeyCode: commandKeyCode, vKeyCode: vKeyCode) else {
+        guard let events = makePasteEvents(source: source) else {
             NSLog("[TextInjector] Failed to create CGEvents for paste fallback")
             return nil
         }
 
-        switch strategy {
-        case .hid:
-            events.forEach { $0.post(tap: .cghidEventTap) }
-            return .hid
-        case .session:
-            events.forEach { $0.post(tap: .cgSessionEventTap) }
-            return .session
-        case .pid:
-            guard let targetContext else { return nil }
-            events.forEach { $0.postToPid(targetContext.processIdentifier) }
-            return .pid
-        case .applescript:
-            return nil // handled separately
-        }
+        events.forEach { $0.post(tap: .cghidEventTap) }
+        return .hid
     }
 
-    private func pasteStrategies(for targetContext: TargetContext?) -> [PasteStrategy] {
-        // AppleScript via System Events is the most reliable across app types (including Electron).
-        // CGEvent strategies are kept as fallbacks.
-        return [.applescript, .hid]
-    }
-
-    private func makePasteEvents(
-        source: CGEventSource,
-        commandKeyCode: CGKeyCode,
-        vKeyCode: CGKeyCode
-    ) -> [CGEvent]? {
+    private func makePasteEvents(source: CGEventSource) -> [CGEvent]? {
+        let commandKeyCode: CGKeyCode = 55
+        let vKeyCode: CGKeyCode = 9
         guard let commandDown = CGEvent(keyboardEventSource: source, virtualKey: commandKeyCode, keyDown: true),
               let vDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
               let vUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false),

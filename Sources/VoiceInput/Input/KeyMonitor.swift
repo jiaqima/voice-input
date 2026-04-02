@@ -23,12 +23,8 @@ final class KeyMonitor {
     func start() {
         monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             let fnActive = event.modifierFlags.contains(.function)
-            if Thread.isMainThread {
+            DispatchQueue.main.async {
                 self?.handleFnStateChange(isActive: fnActive)
-            } else {
-                DispatchQueue.main.async {
-                    self?.handleFnStateChange(isActive: fnActive)
-                }
             }
         }
         if monitor == nil {

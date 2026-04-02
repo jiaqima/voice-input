@@ -8,8 +8,8 @@ final class InputMethodManager {
 
         guard let asciiSource = findASCIIInputSource() else { return }
 
-        let currentID = inputSourceID(savedInputSource)
-        let asciiID = inputSourceID(asciiSource)
+        let currentID = Self.inputSourceID(savedInputSource)
+        let asciiID = Self.inputSourceID(asciiSource)
         if currentID != asciiID {
             TISSelectInputSource(asciiSource)
         }
@@ -23,10 +23,7 @@ final class InputMethodManager {
 
     static func isCJKInputMethodActive() -> Bool {
         let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-        guard let idPtr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else {
-            return false
-        }
-        let sourceID = Unmanaged<CFString>.fromOpaque(idPtr).takeUnretainedValue() as String
+        guard let sourceID = inputSourceID(source) else { return false }
         let cjkPrefixes = [
             "com.apple.inputmethod.SCIM",    // Simplified Chinese
             "com.apple.inputmethod.TCIM",    // Traditional Chinese
@@ -54,7 +51,7 @@ final class InputMethodManager {
 
         // Prefer ABC or US keyboard
         for source in sources {
-            let sid = inputSourceID(source) ?? ""
+            let sid = Self.inputSourceID(source) ?? ""
             if sid == "com.apple.keylayout.ABC" || sid == "com.apple.keylayout.US" {
                 return source
             }
@@ -62,7 +59,7 @@ final class InputMethodManager {
         return sources.first
     }
 
-    private func inputSourceID(_ source: TISInputSource?) -> String? {
+    private static func inputSourceID(_ source: TISInputSource?) -> String? {
         guard let source = source,
               let ptr = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else {
             return nil

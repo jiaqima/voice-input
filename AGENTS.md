@@ -30,7 +30,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-
    - `SpeechRecognizer` (default): wraps Apple `SFSpeechRecognizer`, streams via `SFSpeechAudioBufferRecognitionRequest`
    - `WhisperSpeechRecognizer`: uses whisper.cpp (C library linked as static `.a`). Resamples audio from device rate to 16kHz mono via `AVAudioConverter`, accumulates samples, runs inference every 2s for partial results and on stop for final result. `WhisperBridge` wraps the C API.
 4. `LLMClient` (optional) refines the transcript using an OpenAI-compatible API — aimed at fixing speech recognition errors (CJK homophones, misheard English terms).
-5. `TextInjector` switches the active input method to ASCII (for CJK contexts), inserts text via the Accessibility API (`kAXSelectedTextAttribute`), falling back to clipboard + simulated Cmd+V if AX insertion fails, then restores the input method.
+5. `TextInjector` switches the active input method to ASCII (for CJK contexts), injects text via CGEvent typing simulation (same mechanism as macOS Dictation), falling back to clipboard + simulated Cmd+V if CGEvent fails, then restores the input method.
 
 **UI** runs as a floating `NSPanel` (HUD material, glass morphism) with a `WaveformView` animated at 60 fps via `CVDisplayLink`.
 
@@ -40,7 +40,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-
 
 - **No external Swift dependencies** — pure Swift using system frameworks + whisper.cpp linked as a static C library.
 - **whisper.cpp** is a git submodule under `vendor/whisper.cpp`, built via cmake into static libraries. The bridging header at `Sources/Bridge/whisper-bridging-header.h` imports `whisper.h`. The Makefile initializes the submodule automatically on first use and builds it with the Xcode toolchain (needed for C++ headers on some systems).
-- **Text injection** (`TextInjector`) uses AX API (`kAXSelectedTextAttribute`) as the primary method, with clipboard + simulated Cmd+V as fallback.
+- **Text injection** (`TextInjector`) uses CGEvent typing simulation as the primary method, with clipboard + simulated Cmd+V as fallback.
 - **LLM base URL is configurable** — any OpenAI-compatible provider (OpenAI, Ollama, LM Studio, etc.) works.
 - **CJK input method switching** (`InputMethodManager`) detects 9+ input method variants and must switch to ASCII before paste to avoid double-conversion.
 - **Swift 6 / macOS 14+** — the package targets arm64 with swift-version 5 compiler flags.

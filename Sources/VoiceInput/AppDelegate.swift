@@ -192,19 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.speechRecognizer.appendBuffer(buffer)
         }
 
-        speechRecognizer.onPartialResult = { [weak self] text in
+        let handleResult: (String) -> Void = { [weak self] text in
             DispatchQueue.main.async {
                 self?.currentTranscription = text
                 self?.capsulePanel.updateText(text)
             }
         }
-
-        speechRecognizer.onFinalResult = { [weak self] text in
-            DispatchQueue.main.async {
-                self?.currentTranscription = text
-                self?.capsulePanel.updateText(text)
-            }
-        }
+        speechRecognizer.onPartialResult = handleResult
+        speechRecognizer.onFinalResult = handleResult
 
         speechRecognizer.onError = { error in
             NSLog("[VoiceInput] speech error: %@", error.localizedDescription)
@@ -414,10 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handleInjectionResult(_ result: TextInjector.InjectionResult) {
         switch result {
-        case .accessibilitySuccess, .typingSimulationSuccess:
-            break
-
-        case .automaticPastePosted:
+        case .typingSimulationSuccess, .automaticPastePosted:
             break
 
         case .manualPasteRequired:

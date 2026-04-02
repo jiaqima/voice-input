@@ -48,19 +48,11 @@ final class WhisperBridge {
         params.single_segment = false
 
         // Set language (nil = auto-detect)
-        var langCString: [CChar]?
-        if let language = language {
-            langCString = Array(language.utf8CString)
-        }
+        var langCString: [CChar] = language.map { Array($0.utf8CString) } ?? []
 
         let result: Int32 = samples.withUnsafeBufferPointer { samplesPtr in
-            if var langBytes = langCString {
-                return langBytes.withUnsafeMutableBufferPointer { langPtr in
-                    params.language = UnsafePointer(langPtr.baseAddress)
-                    return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samples.count))
-                }
-            } else {
-                params.language = nil
+            langCString.withUnsafeMutableBufferPointer { langPtr in
+                params.language = langPtr.isEmpty ? nil : UnsafePointer(langPtr.baseAddress)
                 return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samples.count))
             }
         }
