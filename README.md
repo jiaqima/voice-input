@@ -10,7 +10,7 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 - **Multiple languages** — English, Simplified Chinese, Traditional Chinese, Japanese, Korean
 - **LLM refinement** — optionally polish the transcript via any OpenAI-compatible API (fixes homophones, misheard technical terms)
 - **CJK-safe paste** — automatically switches to ASCII input mode before pasting, then restores your input method
-- **Two speech backends** — Apple Speech (online, streaming) or whisper.cpp (fully offline, local)
+- **Two speech backends** — Apple Speech (online, streaming) or whisper.cpp (fully offline, local); switch via the `sttBackend` field in `~/.config/voice-input/config.json` (`"apple"` or `"whisper"`)
 - **No Swift dependencies** — pure Swift using system frameworks + whisper.cpp (C library, bundled)
 
 ## Usage
