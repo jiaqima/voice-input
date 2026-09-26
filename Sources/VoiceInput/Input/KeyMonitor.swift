@@ -3,6 +3,8 @@ import AppKit
 final class KeyMonitor {
     var onRecordingStart: (() -> Void)?
     var onRecordingStop: (() -> Void)?
+    /// Fired once per recording when Shift is pressed while Fn is still held.
+    var onEditRequested: (() -> Void)?
 
     // The first Fn press must be a short tap; the second press must be held to record.
     private enum State {
@@ -14,18 +16,29 @@ final class KeyMonitor {
     }
 
     private var monitor: Any?
+    private var localMonitor: Any?
     private var state: State = .idle
     private var stateTimer: Timer?
+    private var editRequestedThisRecording = false
 
     private static let doubleTapWindow: TimeInterval = 0.5
     private static let secondHoldThreshold: TimeInterval = 0.5
 
     func start() {
         monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            let fnActive = event.modifierFlags.contains(.function)
+            let flags = event.modifierFlags
             DispatchQueue.main.async {
-                self?.handleFnStateChange(isActive: fnActive)
+                self?.handleFlagsChanged(flags)
             }
+        }
+        // Global monitors do not see events delivered to this app, so also watch locally
+        // for when one of our own panels (e.g. the edit box) is the key window.
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            let flags = event.modifierFlags
+            DispatchQueue.main.async {
+                self?.handleFlagsChanged(flags)
+            }
+            return event
         }
         if monitor == nil {
             DispatchQueue.main.async {
@@ -41,8 +54,19 @@ final class KeyMonitor {
 
     func stop() {
         if let m = monitor { NSEvent.removeMonitor(m) }
+        if let m = localMonitor { NSEvent.removeMonitor(m) }
         monitor = nil
+        localMonitor = nil
         resetState()
+    }
+
+    private func handleFlagsChanged(_ flags: NSEvent.ModifierFlags) {
+        let fnActive = flags.contains(.function)
+        if state == .recording, fnActive, flags.contains(.shift), !editRequestedThisRecording {
+            editRequestedThisRecording = true
+            onEditRequested?()
+        }
+        handleFnStateChange(isActive: fnActive)
     }
 
     private func handleFnStateChange(isActive fnActive: Bool) {
@@ -95,6 +119,7 @@ final class KeyMonitor {
         scheduleTimer(after: Self.secondHoldThreshold) { [weak self] in
             guard let self, self.state == .secondPressHolding else { return }
             self.state = .recording
+            self.editRequestedThisRecording = false
             self.invalidateTimer()
             self.onRecordingStart?()
         }

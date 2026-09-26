@@ -8,6 +8,7 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 
 - **Fn key trigger** — tap Fn once, then press and hold it again; the app observes Fn globally and does not suppress macOS's single-Fn behavior
 - **Multiple languages** — English, Simplified Chinese, Traditional Chinese, Japanese, Korean, plus **Auto (中/英)** for mixed Chinese/English in one utterance (Whisper backend only)
+- **Review before inserting** — press Shift while still holding Fn to open an edit box on release; Return inserts, Shift+Return adds a newline, Escape discards
 - **LLM refinement** — optionally polish the transcript via any OpenAI-compatible API (fixes homophones, misheard technical terms)
 - **CJK-safe paste** — automatically switches to ASCII input mode before pasting, then restores your input method
 - **Two speech backends** — Apple Speech (online, streaming) or whisper.cpp (fully offline, local); switch via the `sttBackend` field in `~/.config/voice-input/config.json` (`"apple"` or `"whisper"`)
@@ -20,6 +21,7 @@ Tap **Fn** once, then press and hold it again for 0.5 seconds to start recording
 3. In any application, **tap the Fn (Globe) key once**, then press and hold it again within about half a second. Recording starts after the second hold reaches about half a second, and a floating capsule with a live waveform confirms recording is active.
 4. Speak your text, then **release the second Fn hold** to stop recording. The transcribed text is automatically pasted into the active text field.
 5. A single Fn press or a single long Fn hold does not start dictation. VoiceInput observes Fn globally, so the first tap still reaches macOS or any other Fn-based behavior you already use.
+6. To review or fix the transcript before it is inserted, **press Shift while still holding Fn** (the capsule text turns yellow). On release, an edit box opens instead of typing. Press **Return** to insert the edited text, **Shift+Return** to add a newline, or **Escape** to discard it entirely.
 
 ## Requirements
 

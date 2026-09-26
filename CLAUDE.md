@@ -24,7 +24,7 @@ No test suite or linter is configured.
 VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-and-hold → audio capture → speech recognition → optional LLM refinement → text injection** into the active application.
 
 **AppDelegate** is the central orchestrator. It owns all components and drives the recording lifecycle:
-1. `KeyMonitor` detects a short Fn tap followed by a second Fn press held for 0.5 seconds via `NSEvent.addGlobalMonitorForEvents` (accessibility permission required). Single Fn holds are ignored, and the first tap still reaches macOS because the app observes Fn globally rather than suppressing it.
+1. `KeyMonitor` detects a short Fn tap followed by a second Fn press held for 0.5 seconds via `NSEvent.addGlobalMonitorForEvents` (accessibility permission required). Single Fn holds are ignored, and the first tap still reaches macOS because the app observes Fn globally rather than suppressing it. Pressing Shift while Fn is held fires `onEditRequested`; a local flagsChanged monitor mirrors the global one so Fn still works while the app's own edit panel is key.
 2. `AudioRecorder` captures PCM audio via `AVAudioEngine`, emitting RMS levels for the waveform UI.
 3. **Speech recognition** uses `SpeechRecognizerProtocol` — two backends:
    - `SpeechRecognizer` (default): wraps Apple `SFSpeechRecognizer`, streams via `SFSpeechAudioBufferRecognitionRequest`
@@ -33,7 +33,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-
 4. `LLMClient` (optional) refines the transcript using an OpenAI-compatible API — aimed at fixing speech recognition errors (CJK homophones, misheard English terms).
 5. `TextInjector` switches the active input method to ASCII (for CJK contexts), injects text via CGEvent typing simulation (same mechanism as macOS Dictation), falling back to clipboard + simulated Cmd+V if CGEvent fails, then restores the input method.
 
-**UI** runs as a floating `NSPanel` (HUD material, glass morphism) with a `WaveformView` animated at 60 fps via `CVDisplayLink`.
+**UI** runs as a floating `NSPanel` (HUD material, glass morphism) with a `WaveformView` animated at 60 fps via `CVDisplayLink`. `EditPanel` is a second non-activating panel (can become key without activating the app) that shows an editable transcript when Shift was pressed during recording: Return commits to injection, Shift+Return inserts a newline, Escape discards. In edit mode `AppDelegate` waits up to 3s for the recognizer's final result (Apple's `stop()` uses `finish()` so a final result is delivered) before opening the editor; the direct-inject path still uses the latest partial immediately.
 
 **Settings** (UserDefaults) stores: recognition language, STT backend, whisper model path, LLM base URL/API key/model, and whether LLM refinement is enabled.
 

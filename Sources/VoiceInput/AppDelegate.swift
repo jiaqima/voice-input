@@ -9,10 +9,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let textInjector = TextInjector()
     private let llmClient = LLMClient()
     private let capsulePanel = CapsulePanel()
-
+    private let editPanel = EditPanel()
 
     private var currentTranscription = ""
     private var isRecording = false
+    /// Set when Shift was pressed during the current recording; the transcript then goes
+    /// to the edit box instead of straight into the target app.
+    private var editRequested = false
+    private var deliverViaEditor = false
+    private var finalResultWaiter: ((String) -> Void)?
+    private var finalResultTimeoutWorkItem: DispatchWorkItem?
     private var isRebuildingMenu = false
     private var activeSubmissionID: UInt64?
     private var nextSubmissionID: UInt64 = 0
@@ -20,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingRefinementRequest: LLMClient.RefinementRequest?
 
     private static let refinementTimeout: TimeInterval = 2.0
+    /// How long edit mode waits for the recognizer's final result before using the last partial.
+    private static let finalResultTimeout: TimeInterval = 3.0
 
     // Language options
     private struct LanguageOption {
@@ -42,7 +50,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupStatusItem()
         setupKeyMonitor()
         setupAudioPipeline()
+        setupEditPanel()
     }
+
+    private func setupEditPanel() {
+        editPanel.onCommit = { [weak self] text in
+            guard let self, let submissionID = self.activeSubmissionID,
+                  let targetContext = self.editTargetContext else { return }
+            self.editTargetContext = nil
+            NSLog("[VoiceInput] submission \(submissionID) edit committed (\(text.count) chars)")
+            self.injectTranscription(text, targetContext: targetContext, submissionID: submissionID)
+        }
+        editPanel.onCancel = { [weak self] in
+            guard let self else { return }
+            NSLog("[VoiceInput] submission \(self.activeSubmissionID ?? 0) edit discarded")
+            self.editTargetContext = nil
+            self.activeSubmissionID = nil
+            self.capsulePanel.showStatus("Discarded", dismissAfter: 1.0)
+        }
+    }
+
+    private var editTargetContext: TextInjector.TargetContext?
 
     private func createSpeechRecognizer() -> SpeechRecognizerProtocol {
         if Settings.shared.sttBackend == "whisper" {
@@ -184,6 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.stopRecording()
             }
         }
+        keyMonitor.onEditRequested = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.isRecording else { return }
+                self.editRequested = true
+                self.capsulePanel.showEditHint()
+            }
+        }
         keyMonitor.start()
     }
 
@@ -198,14 +233,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.speechRecognizer.appendBuffer(buffer)
         }
 
-        let handleResult: (String) -> Void = { [weak self] text in
+        speechRecognizer.onPartialResult = { [weak self] text in
             DispatchQueue.main.async {
-                self?.currentTranscription = text
-                self?.capsulePanel.updateText(text)
+                guard let self, self.isRecording else { return }
+                self.currentTranscription = text
+                self.capsulePanel.updateText(text)
             }
         }
-        speechRecognizer.onPartialResult = handleResult
-        speechRecognizer.onFinalResult = handleResult
+        speechRecognizer.onFinalResult = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if !text.isEmpty {
+                    self.currentTranscription = text
+                    self.capsulePanel.updateText(text)
+                }
+                if let waiter = self.finalResultWaiter {
+                    self.clearFinalResultWaiter()
+                    waiter(self.currentTranscription)
+                }
+            }
+        }
 
         speechRecognizer.onError = { error in
             NSLog("[VoiceInput] speech error: %@", error.localizedDescription)
@@ -217,6 +264,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startRecording() {
         guard !isRecording else { return }
         cancelPendingRefinement(reason: "starting a new recording")
+        clearFinalResultWaiter()
+        editPanel.dismissEditor()
+        editTargetContext = nil
+        editRequested = false
+        deliverViaEditor = false
         activeSubmissionID = nil
         isRecording = true
         currentTranscription = ""
@@ -259,7 +311,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let targetContext = textInjector.captureTargetContext()
-        let text = currentTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        deliverViaEditor = editRequested
+        editRequested = false
+
+        if deliverViaEditor {
+            // Give the recognizer a moment to deliver its final result so the editor shows everything.
+            awaitFinalTranscript(submissionID: submissionID) { [weak self] text in
+                self?.processTranscript(text, targetContext: targetContext, submissionID: submissionID)
+            }
+        } else {
+            processTranscript(currentTranscription, targetContext: targetContext, submissionID: submissionID)
+        }
+    }
+
+    private func processTranscript(
+        _ rawText: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64
+    ) {
+        guard isCurrentSubmission(submissionID) else { return }
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             activeSubmissionID = nil
             capsulePanel.dismiss()
@@ -270,8 +341,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Settings.shared.llmEnabled && Settings.shared.isLLMConfigured {
             startRefinement(for: text, targetContext: targetContext, submissionID: submissionID)
         } else {
-            injectTranscription(text, targetContext: targetContext, submissionID: submissionID)
+            deliverTranscription(text, targetContext: targetContext, submissionID: submissionID)
         }
+    }
+
+    private func awaitFinalTranscript(submissionID: UInt64, handler: @escaping (String) -> Void) {
+        clearFinalResultWaiter()
+        finalResultWaiter = handler
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.finalResultWaiter != nil, self.isCurrentSubmission(submissionID) else { return }
+            NSLog("[VoiceInput] submission \(submissionID) final result timed out; using last partial")
+            self.clearFinalResultWaiter()
+            handler(self.currentTranscription)
+        }
+        finalResultTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.finalResultTimeout, execute: timeout)
+    }
+
+    private func clearFinalResultWaiter() {
+        finalResultWaiter = nil
+        finalResultTimeoutWorkItem?.cancel()
+        finalResultTimeoutWorkItem = nil
+    }
+
+    /// Route a finished transcript either to the edit box or straight to injection.
+    private func deliverTranscription(
+        _ text: String,
+        targetContext: TextInjector.TargetContext?,
+        submissionID: UInt64
+    ) {
+        guard isCurrentSubmission(submissionID) else { return }
+        guard deliverViaEditor else {
+            injectTranscription(text, targetContext: targetContext, submissionID: submissionID)
+            return
+        }
+
+        deliverViaEditor = false
+        cancelPendingRefinement(reason: "submission \(submissionID) is going to the editor")
+        editTargetContext = targetContext
+        capsulePanel.dismiss()
+        NSLog("[VoiceInput] submission \(submissionID) opening editor (\(text.count) chars)")
+        editPanel.present(text: text)
     }
 
     private func startRefinement(
@@ -327,11 +437,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch result {
         case .success(let refinedText):
             NSLog("[VoiceInput] submission \(submissionID) refinement succeeded in \(elapsed)s")
-            injectTranscription(refinedText, targetContext: targetContext, submissionID: submissionID)
+            deliverTranscription(refinedText, targetContext: targetContext, submissionID: submissionID)
         case .failure(let error):
             NSLog("[VoiceInput] submission \(submissionID) refinement failed in \(elapsed)s: \(error.localizedDescription)")
             NSLog("[VoiceInput] submission \(submissionID) falling back to original transcript")
-            injectTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
+            deliverTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
         }
     }
 
@@ -347,7 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSLog("[VoiceInput] submission \(submissionID) refinement timed out after \(elapsed)s")
         NSLog("[VoiceInput] submission \(submissionID) falling back to original transcript")
         cancelPendingRefinement(reason: "submission \(submissionID) timed out")
-        injectTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
+        deliverTranscription(originalText, targetContext: targetContext, submissionID: submissionID)
     }
 
     private func injectTranscription(

@@ -8,8 +8,11 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
     private var recognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var sessionID = 0
 
     func start(language: RecognitionLanguage) {
+        sessionID += 1
+        let session = sessionID
         let locale = language.fallbackLocale
         if case .autoChineseEnglish = language {
             NSLog("[SpeechRecognizer] Auto (中/英) mode requires the Whisper backend; falling back to %@", locale.identifier)
@@ -28,7 +31,7 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
         recognitionRequest = request
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self = self else { return }
+            guard let self = self, self.sessionID == session else { return }
 
             if let result = result {
                 let text = result.bestTranscription.formattedString
@@ -50,8 +53,9 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
     }
 
     func stop() {
+        // finish() lets the task deliver its final result; cancel() would drop it.
         recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
+        recognitionTask?.finish()
         recognitionRequest = nil
         recognitionTask = nil
         recognizer = nil

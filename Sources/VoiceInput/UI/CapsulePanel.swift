@@ -88,8 +88,14 @@ final class CapsulePanel: NSPanel {
         currentTextWidth = minTextWidth
     }
 
+    /// Tint the transcript to confirm that the edit box will open on release.
+    func showEditHint() {
+        textLabel.textColor = NSColor(calibratedRed: 1.0, green: 0.85, blue: 0.4, alpha: 1.0)
+    }
+
     func showRecording() {
         cancelDismissWorkItem()
+        textLabel.textColor = .white
         updateText("Listening...")
         positionAtBottom()
 
