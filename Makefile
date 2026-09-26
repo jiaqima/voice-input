@@ -20,6 +20,8 @@ SWIFT_FLAGS = -target arm64-apple-macosx14.0 -swift-version 5 -sdk $(SDK) -modul
 # Code signing identity. Use "make SIGN_IDENTITY=VoiceInput\ Dev install" with a
 # self-signed certificate to preserve TCC permissions across rebuilds.
 # Default: ad-hoc signing (permissions reset on every rebuild).
+# The bundle is re-signed on every build/run/install, even when nothing was
+# recompiled, so a stale ad-hoc signature never leaks into an install.
 SIGN_IDENTITY ?= -
 
 # whisper.cpp
@@ -31,9 +33,13 @@ MODEL_DIR = models
 DEFAULT_MODEL ?= large-v3-turbo-q8_0
 INSTALLED_MODEL_PATH = $(INSTALL_DIR)/$(APP_NAME).app/Contents/Resources/ggml-$(DEFAULT_MODEL).bin
 
-.PHONY: build run install clean whisper-lib download-model install-config-default ensure-whisper-submodule
+.PHONY: build sign run install clean whisper-lib download-model install-config-default ensure-whisper-submodule
 
-build: $(BINARY)
+build: $(BINARY) sign
+
+sign:
+	@codesign --force --sign "$(SIGN_IDENTITY)" --entitlements VoiceInput.entitlements "$(APP_BUNDLE)"
+	@echo "Signed $(APP_BUNDLE) with identity: $(SIGN_IDENTITY)"
 
 $(BINARY): $(SWIFT_FILES) $(WHISPER_LIB) Info.plist VoiceInput.entitlements
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
@@ -54,7 +60,6 @@ $(BINARY): $(SWIFT_FILES) $(WHISPER_LIB) Info.plist VoiceInput.entitlements
 	@if [ -f "$(MODEL_DIR)/ggml-$(DEFAULT_MODEL).bin" ]; then \
 		cp "$(MODEL_DIR)/ggml-$(DEFAULT_MODEL).bin" "$(APP_BUNDLE)/Contents/Resources/"; \
 	fi
-	@codesign --force --sign "$(SIGN_IDENTITY)" --entitlements VoiceInput.entitlements "$(APP_BUNDLE)"
 	@echo "Built: $(APP_BUNDLE)"
 
 # Build whisper.cpp as a static library

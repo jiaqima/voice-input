@@ -64,7 +64,14 @@ On first launch the app requests:
 - **Accessibility** — for global Fn key monitoring via `NSEvent.addGlobalMonitorForEvents`
 - **Input Monitoring** — fallback for simulated Cmd+V paste (add manually in System Settings > Privacy & Security > Input Monitoring if the clipboard fallback doesn't work)
 
-> **Note:** The app is ad-hoc signed, so macOS invalidates permission grants after each rebuild. You may need to re-grant Accessibility and Input Monitoring permissions after running `make install`.
+> **Note:** The app is ad-hoc signed by default, so macOS invalidates permission grants after each rebuild. You may need to re-grant Accessibility and Input Monitoring permissions after running `make install`. Use `SIGN_IDENTITY` (see above) to avoid this.
+
+> **If dictation works but no text is typed:** the stored Accessibility grant was probably created under a different signature (for example an earlier ad-hoc build). System Settings still shows the app as enabled, but macOS silently denies it. Reset the stale entries and re-grant:
+> ```bash
+> tccutil reset Accessibility com.voiceinput.app
+> tccutil reset ListenEvent com.voiceinput.app
+> tccutil reset PostEvent com.voiceinput.app
+> ```
 
 ## LLM Refinement (optional)
 
