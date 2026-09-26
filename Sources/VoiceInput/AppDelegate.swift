@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private let languages: [LanguageOption] = [
+        LanguageOption(name: "Auto (中/英)", locale: RecognitionLanguage.autoChineseEnglishSettingValue),
         LanguageOption(name: "English", locale: "en-US"),
         LanguageOption(name: "简体中文", locale: "zh-CN"),
         LanguageOption(name: "繁體中文", locale: "zh-TW"),
@@ -68,12 +69,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Language submenu
         let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
+        langMenu.autoenablesItems = false
         let currentLocale = Settings.shared.language
+        let isWhisper = Settings.shared.sttBackend == "whisper"
         for lang in languages {
-            let item = NSMenuItem(title: lang.name, action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            let isAutoMode = lang.locale == RecognitionLanguage.autoChineseEnglishSettingValue
+            let title = (isAutoMode && !isWhisper) ? lang.name + " — Whisper only" : lang.name
+            let item = NSMenuItem(title: title, action: #selector(selectLanguage(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = lang.locale
             item.state = (lang.locale == currentLocale) ? .on : .off
+            item.isEnabled = !(isAutoMode && !isWhisper)
             langMenu.addItem(item)
         }
         langItem.submenu = langMenu
@@ -215,9 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isRecording = true
         currentTranscription = ""
 
-        // Start speech recognizer with selected locale
-        let locale = Locale(identifier: Settings.shared.language)
-        speechRecognizer.start(locale: locale)
+        // Start speech recognizer with selected language mode
+        let language = RecognitionLanguage(settingValue: Settings.shared.language)
+        speechRecognizer.start(language: language)
 
         // Start audio
         do {

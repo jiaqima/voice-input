@@ -68,6 +68,7 @@ final class LLMClient {
     - NEVER add or remove content
     - NEVER change the meaning or tone
     - NEVER translate between languages
+    - For mixed Chinese/English text, keep each part in its original language; never translate English terms into Chinese or Chinese into English
     - Only fix clear, unambiguous recognition errors
     - Return ONLY the corrected text, no explanations
 

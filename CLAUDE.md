@@ -29,6 +29,7 @@ VoiceInput is a macOS background app (no dock icon) that maps **Fn double-press-
 3. **Speech recognition** uses `SpeechRecognizerProtocol` — two backends:
    - `SpeechRecognizer` (default): wraps Apple `SFSpeechRecognizer`, streams via `SFSpeechAudioBufferRecognitionRequest`
    - `WhisperSpeechRecognizer`: uses whisper.cpp (C library linked as static `.a`). Resamples audio from device rate to 16kHz mono via `AVAudioConverter`, accumulates samples, runs inference every 2s for partial results and on stop for final result. `WhisperBridge` wraps the C API.
+   - Recognizers take a `RecognitionLanguage` (`.locale(Locale)` or `.autoChineseEnglish`, stored in settings as `"auto-zh-en"`). Auto mode is Whisper-only: it runs whisper's language detector, picks `zh` unless the audio is clearly English (zh-biased threshold), locks the choice after 3s of audio, and passes a Simplified-Chinese `initial_prompt` so English terms inside Chinese sentences stay English. Apple Speech falls back to zh-CN in auto mode.
 4. `LLMClient` (optional) refines the transcript using an OpenAI-compatible API — aimed at fixing speech recognition errors (CJK homophones, misheard English terms).
 5. `TextInjector` switches the active input method to ASCII (for CJK contexts), injects text via CGEvent typing simulation (same mechanism as macOS Dictation), falling back to clipboard + simulated Cmd+V if CGEvent fails, then restores the input method.
 

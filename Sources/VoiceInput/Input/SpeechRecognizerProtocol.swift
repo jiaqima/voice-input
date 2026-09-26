@@ -5,7 +5,7 @@ protocol SpeechRecognizerProtocol: AnyObject {
     var onFinalResult: ((String) -> Void)? { get set }
     var onError: ((Error) -> Void)? { get set }
 
-    func start(locale: Locale)
+    func start(language: RecognitionLanguage)
     func appendBuffer(_ buffer: AVAudioPCMBuffer)
     func stop()
 }

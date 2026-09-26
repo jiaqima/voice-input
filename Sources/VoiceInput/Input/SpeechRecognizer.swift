@@ -9,7 +9,11 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
 
-    func start(locale: Locale) {
+    func start(language: RecognitionLanguage) {
+        let locale = language.fallbackLocale
+        if case .autoChineseEnglish = language {
+            NSLog("[SpeechRecognizer] Auto (中/英) mode requires the Whisper backend; falling back to %@", locale.identifier)
+        }
         recognizer = SFSpeechRecognizer(locale: locale)
         guard let recognizer = recognizer, recognizer.isAvailable else {
             print("Speech recognizer not available for locale: \(locale.identifier)")

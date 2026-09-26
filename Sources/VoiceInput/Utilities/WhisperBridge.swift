@@ -36,24 +36,72 @@ final class WhisperBridge {
         }
     }
 
+    private var threadCount: Int32 {
+        Int32(min(ProcessInfo.processInfo.activeProcessorCount, 8))
+    }
+
+    struct LanguageProbabilities {
+        let zh: Float
+        let en: Float
+        let topLanguage: String
+    }
+
+    /// Run whisper's language detector on the first 30s window of the samples.
+    /// Returns nil if detection fails.
+    func detectLanguage(samples: [Float]) -> LanguageProbabilities? {
+        guard let ctx = ctx, !samples.isEmpty else { return nil }
+
+        let melResult = samples.withUnsafeBufferPointer { samplesPtr in
+            whisper_pcm_to_mel(ctx, samplesPtr.baseAddress, Int32(samples.count), threadCount)
+        }
+        guard melResult == 0 else {
+            NSLog("[WhisperBridge] whisper_pcm_to_mel failed: %d", melResult)
+            return nil
+        }
+
+        var probs = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
+        let topID = probs.withUnsafeMutableBufferPointer { probsPtr in
+            whisper_lang_auto_detect(ctx, 0, threadCount, probsPtr.baseAddress)
+        }
+        guard topID >= 0 else {
+            NSLog("[WhisperBridge] language detection failed: %d", topID)
+            return nil
+        }
+
+        let zhID = Int(whisper_lang_id("zh"))
+        let enID = Int(whisper_lang_id("en"))
+        let topLanguage = whisper_lang_str(topID).map { String(cString: $0) } ?? "?"
+        return LanguageProbabilities(
+            zh: zhID >= 0 ? probs[zhID] : 0,
+            en: enID >= 0 ? probs[enID] : 0,
+            topLanguage: topLanguage
+        )
+    }
+
     /// Transcribe Float32 PCM samples at 16kHz mono.
     /// Returns the concatenated text from all segments.
-    func transcribe(samples: [Float], language: String?) -> String {
+    /// - language: whisper language code, or nil for auto-detect.
+    /// - initialPrompt: optional text that steers vocabulary and script (e.g. Simplified Chinese).
+    func transcribe(samples: [Float], language: String?, initialPrompt: String? = nil) -> String {
         guard let ctx = ctx else { return "" }
         guard !samples.isEmpty else { return "" }
 
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
-        params.n_threads = Int32(min(ProcessInfo.processInfo.activeProcessorCount, 8))
+        params.n_threads = threadCount
         params.no_timestamps = true
         params.single_segment = false
 
-        // Set language (nil = auto-detect)
+        // C strings must outlive the whisper_full call.
         var langCString: [CChar] = language.map { Array($0.utf8CString) } ?? []
+        var promptCString: [CChar] = initialPrompt.map { Array($0.utf8CString) } ?? []
 
         let result: Int32 = samples.withUnsafeBufferPointer { samplesPtr in
             langCString.withUnsafeMutableBufferPointer { langPtr in
-                params.language = langPtr.isEmpty ? nil : UnsafePointer(langPtr.baseAddress)
-                return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samples.count))
+                promptCString.withUnsafeMutableBufferPointer { promptPtr in
+                    params.language = langPtr.isEmpty ? nil : UnsafePointer(langPtr.baseAddress)
+                    params.initial_prompt = promptPtr.isEmpty ? nil : UnsafePointer(promptPtr.baseAddress)
+                    return whisper_full(ctx, params, samplesPtr.baseAddress, Int32(samples.count))
+                }
             }
         }
 
